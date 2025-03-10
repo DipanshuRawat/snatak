@@ -1,0 +1,92 @@
+---
+- name: Install and Configure Jenkins
+  hosts: ansi
+  become: yes
+  vars:
+    jenkins_admin_password: "{{ lookup('file', '/var/lib/jenkins/secrets/initialAdminPassword') }}"
+
+  tasks:
+    - name: Install Java 17 (Multi-OS)
+      block:
+        - name: Install OpenJDK 17 (Debian)
+          apt:
+            name: openjdk-17-jdk
+            state: present
+            update_cache: yes
+          when: ansible_os_family == 'Debian'
+
+        - name: Install OpenJDK 17 (RedHat)
+          yum:
+            name: java-17-openjdk-devel
+            state: present
+          when: ansible_os_family == 'RedHat'
+
+    - name: Add Jenkins repository key
+      apt_key:
+        url: https://pkg.jenkins.io/debian/jenkins.io.key
+        state: present
+      when: ansible_os_family == 'Debian'
+
+    - name: Add Jenkins repository (Debian)
+      apt_repository:
+        repo: "deb https://pkg.jenkins.io/debian-stable binary/"
+        state: present
+      when: ansible_os_family == 'Debian'
+
+    - name: Add Jenkins repository (RedHat)
+      get_url:
+        url: https://pkg.jenkins.io/redhat-stable/jenkins.repo
+        dest: /etc/yum.repos.d/jenkins.repo
+      when: ansible_os_family == 'RedHat'
+
+    - name: Install Jenkins
+      package:
+        name: jenkins
+        state: latest
+
+    - name: Set Java 17 as default for Jenkins
+      alternatives:
+        name: java
+        path: /usr/lib/jvm/java-17-openjdk-amd64/bin/java
+      when: ansible_os_family == 'Debian'
+
+    - name: Set Java 17 as default for Jenkins (RedHat)
+      alternatives:
+        name: java
+        path: /usr/lib/jvm/java-17-openjdk/bin/java
+      when: ansible_os_family == 'RedHat'
+
+    - name: Start and enable Jenkins service
+      systemd:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    - name: Wait for Jenkins port to become available
+      ansible.builtin.wait_for:
+        port: 8080
+        delay: 10
+        timeout: 120  # Total wait = 120 seconds
+
+    - name: Retrieve initial admin password
+      command: cat /var/lib/jenkins/secrets/initialAdminPassword
+      register: jenkins_initial_password
+      changed_when: false
+
+    - name: Install Jenkins plugins using module
+      community.general.jenkins_plugin:
+        name: "{{ item }}"
+        url: http://44.202.241.29:8080
+        url_username: admin
+        url_password: "{{ jenkins_initial_password.stdout }}"
+        timeout: 120
+      loop:
+        - slack
+        - blueocean
+      notify: Restart Jenkins
+
+  handlers:
+    - name: Restart Jenkins
+      systemd:
+        name: jenkins
+        state: restarted
