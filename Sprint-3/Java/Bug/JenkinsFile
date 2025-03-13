@@ -1,0 +1,63 @@
+pipeline {
+    agent any
+
+    tools {
+        maven 'Maven'  
+    }
+
+    environment {
+        GIT_CREDENTIALS_ID = 'Cred'
+    }
+
+    stages {
+        stage('Clone Repository') {
+            steps {
+                echo 'Cloning the private repository...'
+                script {
+                    git branch: 'main', 
+                        credentialsId: "${GIT_CREDENTIALS_ID}", 
+                        url: 'https://github.com/Snaatak-Skyops/salary-api.git'
+                }
+            }
+        }
+
+        stage('SpotBugs Check') {
+            steps {
+                echo 'Running SpotBugs check...'
+                sh '''
+                    mvn spotbugs:check > spotbugs-check-output.txt
+                    cat spotbugs-check-output.txt
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline completed.'
+            archiveArtifacts artifacts: 'spotbugs-check-output.txt', allowEmptyArchive: true
+        }
+        success {
+            echo 'SpotBugs check passed successfully!'
+            emailext(
+                attachmentsPattern: 'spotbugs-check-output.txt',
+                body: """Job ${env.JOB_NAME} build ${env.BUILD_NUMBER} completed successfully.
+More details: ${env.BUILD_URL}""",
+                subject: "Jenkins Build SUCCESS: Job ${env.JOB_NAME}",
+                to: 'princerawat2108@gmail.com'
+            )
+        }
+        failure {
+            echo 'SpotBugs check failed.'
+            emailext(
+                to: 'princerawat2108@gmail.com',
+                subject: 'Jenkins Pipeline Failure: Salary-api',
+                body: """Hello,
+
+The Jenkins pipeline has failed. Please check the logs.
+More details: ${env.BUILD_URL}""",
+                attachmentsPattern: 'spotbugs-check-output.txt'
+            )
+        }
+    }
+}
